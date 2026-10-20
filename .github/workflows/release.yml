@@ -1,0 +1,39 @@
+# Build every platform for a release, in one run.
+#
+# This does NOT publish a GitHub Release or attach anything to one. It only
+# builds. Run it from the Actions tab ("Run workflow"); when the jobs finish,
+# download the per-platform files from the run's Artifacts section and attach
+# whichever you want to a release yourself.
+#
+# Artifacts produced by this run:
+#   CoinTex-linux            single-file Linux executable
+#   CoinTex-windows          Windows executable
+#   CoinTex-macos            macOS .app bundle (zipped)
+#   CoinTex-android          debug apk (unsigned, for sideloading/testing)
+#   CoinTex-unsigned-ipa     unsigned iOS app (sideload with AltStore/Sideloadly)
+#   CoinTex-xcode-project    portable App Store-configured Xcode project
+#
+# Each build workflow is reused via `uses:` and can also be run on its own from
+# the Actions tab. The signed Google Play .aab is produced locally with
+# ./build_android.sh, not here.
+# The signed iOS IPA is intentionally isolated in ios-app-store.yml, which
+# requires a protected environment and Apple distribution credentials.
+
+name: Release
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  desktop:
+    uses: ./.github/workflows/desktop-build.yml
+
+  android:
+    uses: ./.github/workflows/android-build.yml
+
+  ios:
+    uses: ./.github/workflows/ios-build.yml

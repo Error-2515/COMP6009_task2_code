@@ -1,0 +1,5 @@
+config,level,runs,wins,success_rate,survival_rate,mean_coins,mean_life_pct,mean_generations,mean_time_wins_s,mean_time_all_s
+p10_r_s,1,2,0,0.0,0.0,2.0,0.0,81.5,,20.54
+p10_r_s,9,1,0,0.0,0.0,1.0,0.0,5.0,,1.26
+p10_r_s,21,1,0,0.0,0.0,1.0,0.0,48.0,,12.07
+p10_r_s,24,1,0,0.0,0.0,4.0,0.0,4.0,,1.01

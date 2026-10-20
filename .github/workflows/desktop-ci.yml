@@ -1,0 +1,64 @@
+# Quick desktop sanity check that runs on every push and PR.
+#
+# It does three things:
+#   1. Installs the Python requirements on a clean Ubuntu runner.
+#   2. Byte-compiles every Python file (catches syntax errors).
+#   3. Boots the app under xvfb (catches import errors and obvious startup crashes).
+#
+# Catches the kind of regressions that buildozer / kivy-ios would only surface
+# after a 30-90 minute build.
+
+name: Desktop CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install SDL2 and Kivy runtime libraries
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xvfb libsdl2-2.0-0 libsdl2-image-2.0-0 libsdl2-mixer-2.0-0 \
+            libsdl2-ttf-2.0-0 libgl1-mesa-dri libgles2 libmtdev1 xclip
+
+      - name: Install Python requirements
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+
+      - name: Byte-compile every .py
+        run: |
+          # find -regex puts the longer alternative first so .py and .pyi both match.
+          python -m compileall -q .
+
+      - name: Run focused unit tests
+        run: python -m unittest discover -s tests -v
+
+      - name: Exercise the app under xvfb
+        env:
+          SDL_AUDIODRIVER: dummy
+          XDG_CONFIG_HOME: /tmp/cointex-smoke-data
+        run: |
+          # Software OpenGL initialization can take more than 15 seconds on a
+          # busy hosted runner. The smoke script still stops itself promptly
+          # once its checks finish; this is only a deadlock guard.
+          xvfb-run -a timeout 30 python tools/smoke_test_app.py

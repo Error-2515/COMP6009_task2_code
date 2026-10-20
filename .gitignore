@@ -1,0 +1,48 @@
+# Python virtual environments
+venv/
+.venv/
+env/
+
+# Python cache files
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Buildozer / python-for-android
+.buildozer/
+bin/
+*.apk
+*.aab
+
+# kivy-ios
+.ios-venv/
+CoinTex-ios/
+cointex-ios/
+.ios-app/
+*.xcarchive
+*.mobileprovision
+AuthKey_*.p8
+
+# PyInstaller desktop build output (build_desktop.sh)
+build/
+dist/
+*.spec
+
+# Candidate/alternative audio (dev scratch, reproducible via tools/gen_assets.py)
+audio_alternatives/
+
+# Signing files, keep these private
+*.keystore
+*.jks
+*.pem
+*.p12
+.env
+keystore-backup-note.txt
+
+# Game save file
+game_info
+
+# OS and editor files
+.DS_Store
+*.swp

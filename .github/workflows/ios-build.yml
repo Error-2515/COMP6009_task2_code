@@ -1,0 +1,152 @@
+# Builds an unsigned universal CoinTex iPhone/iPad app and a portable Xcode project.
+#
+# This workflow deliberately has no Apple credentials. Its Release build is
+# validated against the same metadata, privacy manifest, icons, iOS 26 SDK and
+# clean source staging used by the signed App Store workflow. Use
+# ios-app-store.yml only after the Apple Developer account is ready.
+
+name: Build iOS app
+
+on:
+  workflow_dispatch:
+  workflow_call:
+
+concurrency:
+  group: ios-build-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IOS_CONFIG: ios/CoinTex.xcconfig
+
+jobs:
+  build-ios:
+    runs-on: macos-26
+    timeout-minutes: 180
+
+    steps:
+      - name: Check out the code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify the current App Store SDK
+        run: |
+          xcodebuild -version
+          SDK_VERSION="$(xcrun --sdk iphoneos --show-sdk-version)"
+          echo "iPhoneOS SDK $SDK_VERSION"
+          XCODE_MAJOR="$(xcodebuild -version | awk '/^Xcode / {split($2, v, "."); print v[1]}')"
+          SDK_MAJOR="$(echo "$SDK_VERSION" | awk -F. '{print $1}')"
+          if [ "$XCODE_MAJOR" -lt 26 ] || [ "$SDK_MAJOR" -lt 26 ]; then
+            echo "App Store uploads require Xcode 26 and the iOS 26 SDK." >&2
+            exit 1
+          fi
+
+      - name: Install native build tools
+        run: |
+          brew install autoconf automake libtool pkg-config libjpeg
+          brew link libtool || true
+
+      - name: Install the pinned iOS toolchain
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-ios.txt
+
+      - name: Cache the kivy-ios distribution
+        uses: actions/cache@v4
+        with:
+          path: |
+            build
+            dist
+          key: ${{ runner.os }}-${{ runner.arch }}-sdk26-kivyios-${{ hashFiles('requirements-ios.txt') }}-v2
+
+      - name: Build Python and Kivy for iOS
+        run: |
+          toolchain build python3 kivy
+          CERTIFI_REQUIREMENT="$(awk '/^certifi==/ {print; exit}' requirements-ios.txt)"
+          test -n "$CERTIFI_REQUIREMENT"
+          toolchain pip install "$CERTIFI_REQUIREMENT"
+
+      - name: Stage only runtime app files
+        run: |
+          mkdir -p .ios-app/music
+          cp ./*.py .ios-app/
+          cp music/*.wav .ios-app/music/
+          test -f .ios-app/main.py
+
+      - name: Create and configure the Xcode project
+        run: |
+          toolchain create CoinTex .ios-app
+          PROJ_DIR="$(find . -maxdepth 1 -type d -name '*-ios' | head -1)"
+          test -n "$PROJ_DIR"
+          python tools/ios_configure_project.py "$PROJ_DIR" --app-source .ios-app
+          tools/ios_apply_assets.sh "$PROJ_DIR" cointex_logo.png cointex_presplash.png
+          XCODEPROJ="$(find "$PROJ_DIR" -maxdepth 1 -name '*.xcodeproj' | head -1)"
+          SCHEME="$(basename "$XCODEPROJ" .xcodeproj)"
+          echo "PROJ_DIR=$PROJ_DIR" >> "$GITHUB_ENV"
+          echo "XCODEPROJ=$XCODEPROJ" >> "$GITHUB_ENV"
+          echo "SCHEME=$SCHEME" >> "$GITHUB_ENV"
+          xcodebuild -list -project "$XCODEPROJ"
+
+      - name: Build the unsigned Release app
+        run: |
+          xcodebuild \
+            -project "$XCODEPROJ" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build_dd \
+            -xcconfig "$IOS_CONFIG" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            clean build
+
+      - name: Validate App Store-critical bundle contents
+        run: |
+          APP="$(find build_dd/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)"
+          test -n "$APP"
+          python tools/ios_validate_app.py "$APP"
+          echo "APP=$APP" >> "$GITHUB_ENV"
+
+      - name: Package the unsigned IPA
+        run: |
+          mkdir Payload
+          cp -R "$APP" Payload/
+          ditto -c -k --sequesterRsrc --keepParent Payload CoinTex-unsigned.ipa
+          ls -lh CoinTex-unsigned.ipa
+
+      - name: Package the portable Xcode project
+        run: |
+          ditto -c -k --sequesterRsrc --keepParent "$PROJ_DIR" CoinTex-xcode-project.zip
+          ls -lh CoinTex-xcode-project.zip
+
+      - name: Upload the unsigned IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: CoinTex-unsigned-ipa
+          path: CoinTex-unsigned.ipa
+          retention-days: 30
+
+      - name: Upload the Xcode project
+        uses: actions/upload-artifact@v4
+        with:
+          name: CoinTex-xcode-project
+          path: CoinTex-xcode-project.zip
+          retention-days: 30
+
+      - name: Write a run summary
+        run: |
+          {
+            echo "## CoinTex iOS build"
+            echo
+            echo "The universal iPhone/iPad Release app passed bundle, SDK 26, arm64, privacy-manifest, metadata and icon-catalog checks."
+            echo
+            echo "- **CoinTex-unsigned-ipa** is for sideload testing only."
+            echo "- **CoinTex-xcode-project** is portable and can be opened on a Mac for device testing and Xcode-managed signing."
+            echo
+            echo "No Apple credentials were used. This is not the signed App Store IPA."
+          } >> "$GITHUB_STEP_SUMMARY"
